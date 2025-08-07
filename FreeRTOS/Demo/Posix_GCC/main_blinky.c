@@ -91,6 +91,8 @@
 
 /* Local includes. */
 #include "console.h"
+#include "freertos_motor_integration.h"
+#include "fb_allocator.h"
 
 /* Priorities at which the tasks are created. */
 #define mainQUEUE_RECEIVE_TASK_PRIORITY    ( tskIDLE_PRIORITY + 2 )
@@ -104,10 +106,15 @@
 /* The number of items the queue can hold at once. */
 #define mainQUEUE_LENGTH                   ( 2 )
 
-/* The values sent to the queue receive task from the queue send task and the
- * queue send software timer respectively. */
-#define mainVALUE_SENT_FROM_TASK           ( 100UL )
-#define mainVALUE_SENT_FROM_TIMER          ( 200UL )
+/* Motor speed values for cycling through different speeds */
+#define mainMOTOR_SPEED_LOW                ( MOTOR_SPEED_LOW )
+#define mainMOTOR_SPEED_MEDIUM             ( MOTOR_SPEED_MEDIUM )
+#define mainMOTOR_SPEED_HIGH               ( MOTOR_SPEED_HIGH )
+#define mainMOTOR_SPEED_MAX                ( MOTOR_SPEED_MAX )
+#define mainMOTOR_EMERGENCY_STOP           ( MOTOR_EMERGENCY_STOP )
+
+/* Sequence counter for message tracking */
+static uint32_t ulSequenceCounter = 0;
 
 /*-----------------------------------------------------------*/
 
@@ -124,7 +131,7 @@ static void prvQueueSendTimerCallback( TimerHandle_t xTimerHandle );
 
 /*-----------------------------------------------------------*/
 
-/* The queue used by both tasks. */
+/* The queue used by both tasks - now carries motor messages. */
 static QueueHandle_t xQueue = NULL;
 
 /* A software timer that is started from the tick hook. */
@@ -137,11 +144,17 @@ void main_blinky( void )
 {
     const TickType_t xTimerPeriod = mainTIMER_SEND_FREQUENCY_MS;
 
-    /* Create the queue. */
-    xQueue = xQueueCreate( mainQUEUE_LENGTH, sizeof( uint32_t ) );
-
-    if( xQueue != NULL )
-    {
+    /* Create the queue for motor messages. */
+    xQueue = xQueueCreate( mainQUEUE_LENGTH, sizeof( FreeRTOSMotorMessage ) );
+if( xQueue != NULL )
+{
+    /* Initialize the allocator system before using state machine */
+    ALLOC_Init();
+    
+    /* Initialize the motor state machine */
+    InitializeMotorStateMachine();
+    
+        
         /* Start the two tasks as described in the comments at the top of this
          * file. */
         xTaskCreate( prvQueueReceiveTask,             /* The function that implements the task. */
@@ -184,7 +197,17 @@ static void prvQueueSendTask( void * pvParameters )
 {
     TickType_t xNextWakeTime;
     const TickType_t xBlockTime = mainTASK_SEND_FREQUENCY_MS;
-    const uint32_t ulValueToSend = mainVALUE_SENT_FROM_TASK;
+    FreeRTOSMotorMessage xMotorMessage;
+    static uint32_t ulSpeedIndex = 0;
+    
+    /* Array of speeds to cycle through */
+    const uint32_t ulSpeedValues[] = {
+        mainMOTOR_SPEED_LOW,
+        mainMOTOR_SPEED_MEDIUM,
+        mainMOTOR_SPEED_HIGH,
+        mainMOTOR_SPEED_MAX
+    };
+    const uint32_t ulNumSpeeds = sizeof(ulSpeedValues) / sizeof(ulSpeedValues[0]);
 
     /* Prevent the compiler warning about the unused parameter. */
     ( void ) pvParameters;
@@ -194,24 +217,26 @@ static void prvQueueSendTask( void * pvParameters )
 
     for( ; ; )
     {
-        /* Place this task in the blocked state until it is time to run again.
-         *  The block time is specified in ticks, pdMS_TO_TICKS() was used to
-         *  convert a time specified in milliseconds into a time specified in ticks.
-         *  While in the Blocked state this task will not consume any CPU time. */
+        /* Place this task in the blocked state until it is time to run again. */
         vTaskDelayUntil( &xNextWakeTime, xBlockTime );
 
-        /* Send to the queue - causing the queue receive task to unblock and
-         * write to the console.  0 is used as the block time so the send operation
-         * will not block - it shouldn't need to block as the queue should always
-         * have at least one space at this point in the code. */
-        xQueueSend( xQueue, &ulValueToSend, 0U );
+        /* Prepare motor speed command message */
+        xMotorMessage.messageType = MOTOR_SPEED_COMMAND;
+        xMotorMessage.speedValue = ulSpeedValues[ulSpeedIndex];
+        xMotorMessage.sequenceId = ++ulSequenceCounter;
+        
+        /* Cycle through different speeds */
+        ulSpeedIndex = (ulSpeedIndex + 1) % ulNumSpeeds;
+
+        /* Send motor command to the queue */
+        xQueueSend( xQueue, &xMotorMessage, 0U );
     }
 }
 /*-----------------------------------------------------------*/
 
 static void prvQueueSendTimerCallback( TimerHandle_t xTimerHandle )
 {
-    const uint32_t ulValueToSend = mainVALUE_SENT_FROM_TIMER;
+    FreeRTOSMotorMessage xMotorMessage;
 
     /* This is the software timer callback function.  The software timer has a
      * period of two seconds and is reset each time a key is pressed.  This
@@ -221,16 +246,19 @@ static void prvQueueSendTimerCallback( TimerHandle_t xTimerHandle )
     /* Avoid compiler warnings resulting from the unused parameter. */
     ( void ) xTimerHandle;
 
-    /* Send to the queue - causing the queue receive task to unblock and
-     * write out a message.  This function is called from the timer/daemon task, so
-     * must not block.  Hence the block time is set to 0. */
-    xQueueSend( xQueue, &ulValueToSend, 0U );
+    /* Prepare emergency stop command message */
+    xMotorMessage.messageType = mainMOTOR_EMERGENCY_STOP;
+    xMotorMessage.speedValue = 0;  /* Not used for emergency stop */
+    xMotorMessage.sequenceId = ++ulSequenceCounter;
+
+    /* Send emergency stop command to the queue */
+    xQueueSend( xQueue, &xMotorMessage, 0U );
 }
 /*-----------------------------------------------------------*/
 
 static void prvQueueReceiveTask( void * pvParameters )
 {
-    uint32_t ulReceivedValue;
+    FreeRTOSMotorMessage xReceivedMessage;
 
     /* Prevent the compiler warning about the unused parameter. */
     ( void ) pvParameters;
@@ -241,25 +269,27 @@ static void prvQueueReceiveTask( void * pvParameters )
          * indefinitely provided INCLUDE_vTaskSuspend is set to 1 in
          * FreeRTOSConfig.h.  It will not use any CPU time while it is in the
          * Blocked state. */
-        xQueueReceive( xQueue, &ulReceivedValue, portMAX_DELAY );
+        xQueueReceive( xQueue, &xReceivedMessage, portMAX_DELAY );
 
-        /* To get here something must have been received from the queue, but
-         * is it an expected value?  Normally calling printf() from a task is not
-         * a good idea.  Here there is lots of stack space and only one task is
-         * using console IO so it is ok.  However, note the comments at the top of
-         * this file about the risks of making Linux system calls (such as
-         * console output) from a FreeRTOS task. */
-        if( ulReceivedValue == mainVALUE_SENT_FROM_TASK )
+        /* Process the received motor message through the state machine.
+         * This is where the integration happens - FreeRTOS queue messages
+         * are converted to state machine events. */
+        ProcessMotorMessage( &xReceivedMessage );
+
+        /* Additional logging to show the integration is working */
+        if( xReceivedMessage.messageType == MOTOR_SPEED_COMMAND )
         {
-            console_print( "Message received from task\n" );
+            console_print( "Motor speed command processed: %d RPM (seq: %d)\n",
+                          xReceivedMessage.speedValue, xReceivedMessage.sequenceId );
         }
-        else if( ulReceivedValue == mainVALUE_SENT_FROM_TIMER )
+        else if( xReceivedMessage.messageType == MOTOR_EMERGENCY_STOP )
         {
-            console_print( "Message received from software timer\n" );
+            console_print( "Emergency stop command processed (seq: %d)\n",
+                          xReceivedMessage.sequenceId );
         }
         else
         {
-            console_print( "Unexpected message\n" );
+            console_print( "Unknown motor command: %d\n", xReceivedMessage.messageType );
         }
     }
 }
