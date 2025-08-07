@@ -84,6 +84,11 @@ add_executable( posix_demo
                 main_blinky.c
                 main_full.c
                 run-time-stats-utils.c
+                freertos_motor_integration.c
+                C_StateMachine/StateMachine.c
+                C_StateMachine/Motor.c
+                C_StateMachine/sm_allocator.c
+                C_StateMachine/x_allocator.c
                 $<$<NOT:${NO_TRACING}>:${FREERTOS_PLUS_TRACE_SOURCES}>
                 ${CMAKE_CURRENT_LIST_DIR}/../Common/Minimal/AbortDelay.c
                 ${CMAKE_CURRENT_LIST_DIR}/../Common/Minimal/BlockQ.c
@@ -115,6 +120,7 @@ add_executable( posix_demo
 target_include_directories( posix_demo
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/C_StateMachine
         ${CMAKE_CURRENT_LIST_DIR}/../Common/include
         ${FREERTOS_PLUS_TRACE_PATH}/Include
         ${FREERTOS_PLUS_TRACE_PATH}/streamports/File/include

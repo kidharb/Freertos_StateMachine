@@ -13,6 +13,7 @@ FREERTOS_PLUS_DIR     := $(abspath $(FREERTOS_PLUS_DIR_REL))
 KERNEL_DIR            := ${FREERTOS_DIR}/Source
 
 INCLUDE_DIRS          := -I.
+INCLUDE_DIRS          += -I./C_StateMachine
 INCLUDE_DIRS          += -I./Trace_Recorder_Configuration
 INCLUDE_DIRS          += -I${KERNEL_DIR}/include
 INCLUDE_DIRS          += -I${KERNEL_DIR}/portable/ThirdParty/GCC/Posix
@@ -26,6 +27,13 @@ INCLUDE_DIRS          += -I${FREERTOS_PLUS_DIR}/Source/FreeRTOS-Plus-Trace/kerne
 INCLUDE_DIRS          += -I${FREERTOS_PLUS_DIR}/Source/FreeRTOS-Plus-Trace/kernelports/FreeRTOS/
 
 SOURCE_FILES          := $(wildcard *.c)
+SOURCE_FILES          += C_StateMachine/StateMachine.c
+SOURCE_FILES          += C_StateMachine/Motor.c
+SOURCE_FILES          += C_StateMachine/sm_allocator.c
+SOURCE_FILES          += C_StateMachine/x_allocator.c
+SOURCE_FILES          += C_StateMachine/fb_allocator.c
+SOURCE_FILES          += C_StateMachine/LockGuard.c
+SOURCE_FILES          += fault_handler.c
 SOURCE_FILES          += $(wildcard ${FREERTOS_DIR}/Source/*.c)
 # Memory manager (use malloc() / free() )
 SOURCE_FILES          += ${KERNEL_DIR}/portable/MemMang/heap_3.c

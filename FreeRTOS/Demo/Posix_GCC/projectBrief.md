@@ -1,0 +1,3 @@
+This is a posix aware freertos demo program. It runs successfully on a x86 laptop. The demo program is main_blinky.c. There are 2 tasks and a timer. 1 task recieves messages while the other tasks generates messages. When the timer expires, it also sends a message to the receiver task. 
+In the C_StateMachine I have a framework to build and define a statemachine with an example implementation in motor.c.
+I need you to use the freertos blinky demo as a baseline and modify the recieve task to process events in the state engine. the other task can be used to simulate different events. Also use the timer task to generate events. 
